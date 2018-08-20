@@ -1,0 +1,63 @@
+#!/usr/bin/env ruby
+
+paint_installed = `gem list paint -i`.chomp == 'true'
+
+warn 'Gem "paint" not installed (`gem install paint`).' unless paint_installed
+
+gnome_shell_version = `gnome-shell --version`.chomp.sub(/\AGNOME Shell /, '')
+
+if !(gnome_shell_version >= '3.26')
+  warn \
+    'Current gnome shell version does not support links (Only 3.2.6 or above).'
+end
+
+pattern = ARGV[0] && ARGV[0].sub(/\A\//, '').sub(/\/\z/, '')
+
+abort 'No regex pattern given.' unless pattern
+
+# current_folder = ARGV[1] Dir.pwd
+
+require 'paint' if paint_installed
+
+format_directory =
+  if paint_installed
+    proc { |directory| Paint[directory, :blue, :bold] }
+  else
+    proc { |directory| directory }
+  end
+
+format_file = proc { |file| file }
+
+format_link =
+  if gnome_shell_version >= '3.26'
+    proc do |text, ref|
+      `echo -e '\e]8;;#{ref}\a#{text}\e]8;;\a'`.chomp.sub(/\A-e /, '')
+    end
+  else
+    proc { |text, _| text }
+  end
+
+begin
+  regex = /#{pattern}/
+rescue RegexpError => e
+  abort \
+    "Bad regex (#{e.message}).\n" \
+    "Watch examples at #{format_link.('rubular.com', 'http://rubular.com')}."
+end
+
+# entries - directories, subdirectories or files, which match regex
+select_entries = proc { |folder, regex|
+  Dir.
+  entries(folder).
+  select { |entry| entry =~ regex }.
+  map { |entry|
+    File.directory?(entry) ? [entry, select_entries.(entry)] : entry
+  }.
+  flatten
+}
+
+entries = select_entries.(Dir.pwd, regex)
+
+entries.each do |entry|
+  puts File.directory?(entry) ? format_directory.(entry) : format_file.(entry)
+end
